@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mermaid → Stan</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: system-ui, sans-serif;
+    background: #f5f5f5;
+    color: #222;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  header {
+    background: #1a1a2e;
+    color: #eee;
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  header h1 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+
+  .examples {
+    display: flex;
+    gap: 8px;
+    margin-left: auto;
+  }
+
+  .examples button {
+    background: #2a2a4a;
+    color: #ccc;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .examples button:hover {
+    background: #3a3a6a;
+    color: #fff;
+  }
+
+  .panels {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .panel {
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid #ddd;
+    background: #fff;
+  }
+
+  .panel:last-child {
+    border-right: none;
+  }
+
+  .panel-header {
+    background: #f0f0f0;
+    border-bottom: 1px solid #ddd;
+    padding: 6px 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #555;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  textarea {
+    flex: 1;
+    border: none;
+    outline: none;
+    resize: none;
+    padding: 14px;
+    font-family: "JetBrains Mono", "Fira Code", "Menlo", monospace;
+    font-size: 0.82rem;
+    line-height: 1.6;
+    background: #fff;
+    color: #111;
+    width: 100%;
+  }
+
+  textarea[readonly] {
+    background: #fafafa;
+    color: #333;
+  }
+
+  #copyBtn {
+    background: #2563eb;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    padding: 3px 10px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  #copyBtn:hover { background: #1d4ed8; }
+  #copyBtn.copied { background: #16a34a; }
+
+  .error-bar {
+    background: #fef2f2;
+    color: #b91c1c;
+    border-top: 1px solid #fca5a5;
+    padding: 6px 14px;
+    font-size: 0.78rem;
+    font-family: "JetBrains Mono", monospace;
+    min-height: 0;
+    display: none;
+  }
+
+  .error-bar.visible { display: block; }
+
+  .diagram-pane {
+    border-top: 1px solid #ddd;
+    background: #fff;
+    padding: 24px 32px;
+    overflow: auto;
+    display: flex;
+    justify-content: center;
+    min-height: 320px;
+  }
+#diagram-output {
+    max-width: 100%;
+    width: 100%;
+  }
+
+  #diagram-output svg {
+    max-width: 100%;
+    width: 100%;
+    height: auto;
+    min-height: 280px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Mermaid → Stan</h1>
+  <div class="examples">
+    <span style="font-size:0.78rem;color:#999;align-self:center;">Load example:</span>
+    <button onclick="loadExample('linear')">Linear regression</button>
+    <button onclick="loadExample('multiple')">Multiple regression</button>
+  </div>
+  <span style="font-size:0.75rem;color:#f59e0b;background:#2a1a00;border:1px solid #78350f;border-radius:4px;padding:3px 10px;margin-left:8px;">⚠ Vibe-coded prototype — expect bugs</span>
+  <a href="https://github.com/cbrown5/mermaid-to-stan" target="_blank" style="font-size:0.75rem;color:#93c5fd;margin-left:8px;text-decoration:none;opacity:0.8;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8">https://github.com/cbrown5/mermaid-to-stan ↗</a>
+</header>
+
+<div class="panels">
+  <!-- Left: Mermaid editor -->
+  <div class="panel">
+    <div class="panel-header">Mermaid diagram</div>
+    <textarea id="mermaidInput" spellcheck="false" placeholder="Type a Mermaid graph LR diagram…"></textarea>
+    <div id="errorBar" class="error-bar"></div>
+  </div>
+
+  <!-- Right: Stan output -->
+  <div class="panel">
+    <div class="panel-header">
+      Stan code
+      <button id="copyBtn" onclick="copyStan()">Copy</button>
+    </div>
+    <textarea id="stanOutput" readonly placeholder="Stan code will appear here…"></textarea>
+  </div>
+</div>
+
+<!-- Bottom: rendered diagram -->
+<div class="diagram-pane">
+  <div id="diagram-output"></div>
+</div>
+
+<script>
+// ─── Examples ────────────────────────────────────────────────────────────────
+
+const EXAMPLES = {
+  linear: `graph LR
+    N["int"]
+    x["data: vector[N]"]
+    y["obs: Normal(mu,sigma)"]
+    alpha["param: Normal(0,10)"]
+    beta["param: Normal(0,10)"]
+    sigma["param+: HalfNormal(0,1)"]
+    mu["det: alpha + beta*x"]
+
+    alpha --> mu
+    beta --> mu
+    x --> mu
+    mu --> y
+    sigma --> y`,
+
+  multiple: `graph LR
+    N["int"]
+    x1["data: vector[N]"]
+    x2["data: vector[N]"]
+    y["obs: Normal(mu,sigma)"]
+    alpha["param: Normal(0,10)"]
+    b1["param: Normal(0,10)"]
+    b2["param: Normal(0,10)"]
+    sigma["param+: HalfCauchy(0,2.5)"]
+    mu["det: alpha + b1*x1 + b2*x2"]
+
+    alpha --> mu
+    b1 --> mu
+    b2 --> mu
+    x1 --> mu
+    x2 --> mu
+    mu --> y
+    sigma --> y`
+};
+
+function loadExample(key) {
+  document.getElementById('mermaidInput').value = EXAMPLES[key];
+  onInput();
+}
+
+// ─── Distribution lookup ──────────────────────────────────────────────────────
+
+// Maps DSL name → { stanFn, constraint }
+const DIST_MAP = {
+  Normal:      { stanFn: 'normal',       constraint: '' },
+  HalfNormal:  { stanFn: 'normal',       constraint: '<lower=0>' },
+  Cauchy:      { stanFn: 'cauchy',       constraint: '' },
+  HalfCauchy:  { stanFn: 'cauchy',       constraint: '<lower=0>' },
+  Uniform:     { stanFn: 'uniform',      constraint: '' },
+  Beta:        { stanFn: 'beta',         constraint: '' },
+  Exponential: { stanFn: 'exponential',  constraint: '<lower=0>' },
+  StudentT:    { stanFn: 'student_t',    constraint: '' },
+};
+
+// ─── Parser ───────────────────────────────────────────────────────────────────
+
+function parseMermaid(text) {
+  const errors = [];
+
+  // 1. Find all node definitions: id["label"] or id['label']
+  const nodeRe = /(\w+)\[["']([^"']+)["']\]/g;
+  const nodes = {};
+  let m;
+  while ((m = nodeRe.exec(text)) !== null) {
+    const id = m[1];
+    const label = m[2].trim();
+    const colonIdx = label.indexOf(':');
+    if (colonIdx === -1) {
+      // No colon → treat as int shorthand (just a type keyword)
+      nodes[id] = { id, type: label.trim().toLowerCase(), spec: '' };
+    } else {
+      const type = label.slice(0, colonIdx).trim().toLowerCase();
+      const spec = label.slice(colonIdx + 1).trim();
+      nodes[id] = { id, type, spec };
+    }
+  }
+
+  // 2. Collect edges for topological ordering of det nodes
+  const edgeRe = /(\w+)\s*-->\s*(\w+)/g;
+  const edges = []; // [{from, to}]
+  while ((m = edgeRe.exec(text)) !== null) {
+    edges.push({ from: m[1], to: m[2] });
+  }
+
+  // 3. Categorise
+  const intVars  = [];
+  const dataVars = [];
+  const params   = [];
+  const dets     = [];
+  const obsVars  = [];
+
+  for (const node of Object.values(nodes)) {
+    switch (node.type) {
+      case 'int':    intVars.push(node);  break;
+      case 'data':   dataVars.push(node); break;
+      case 'param':  params.push(node);   break;
+      case 'param+': params.push(node);   break;
+      case 'det':    dets.push(node);     break;
+      case 'obs':    obsVars.push(node);  break;
+      default:
+        errors.push(`Unknown node type "${node.type}" on node "${node.id}"`);
+    }
+  }
+
+  // 4. Topologically order det nodes (simple approach: sort by edge dependencies)
+  const orderedDets = topoSort(dets.map(n => n.id), edges)
+    .map(id => nodes[id])
+    .filter(Boolean);
+
+  // 5. Emit Stan
+  const lines = [];
+
+  // --- data block ---
+  lines.push('data {');
+  for (const v of intVars) {
+    lines.push(`  int ${v.id};`);
+  }
+  for (const v of dataVars) {
+    const decl = dataDecl(v.spec, v.id, errors);
+    lines.push(`  ${decl}`);
+  }
+  // observed outcome declared in data too
+  for (const v of obsVars) {
+    const decl = obsDataDecl(v.id, intVars, errors);
+    lines.push(`  ${decl}`);
+  }
+  lines.push('}');
+
+  // --- parameters block ---
+  lines.push('parameters {');
+  for (const v of params) {
+    const decl = paramDecl(v, errors);
+    lines.push(`  ${decl}`);
+  }
+  lines.push('}');
+
+  // --- model block ---
+  lines.push('model {');
+  // declare det vars
+  for (const v of orderedDets) {
+    const decl = detDecl(v, intVars, errors);
+    lines.push(`  ${decl}`);
+  }
+  // assignments for det vars
+  for (const v of orderedDets) {
+    lines.push(`  ${v.id} = ${v.spec};`);
+  }
+  // priors
+  for (const v of params) {
+    const prior = emitPrior(v, errors);
+    if (prior) lines.push(`  ${prior}`);
+  }
+  // likelihood
+  for (const v of obsVars) {
+    const lik = emitLikelihood(v, errors);
+    if (lik) lines.push(`  ${lik}`);
+  }
+  lines.push('}');
+
+  return { stan: lines.join('\n'), errors };
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function dataDecl(spec, id, errors) {
+  // spec is like "vector[N]" or "real" or "int"
+  spec = spec.trim();
+  if (!spec) {
+    errors.push(`data node "${id}" has no type spec`);
+    return `real ${id}; // ERROR: missing spec`;
+  }
+  return `${spec} ${id};`;
+}
+
+function obsDataDecl(id, intVars, errors) {
+  // Guess the observed variable is a vector matching the first int var (usually N)
+  const N = intVars.length > 0 ? intVars[0].id : 'N';
+  return `vector[${N}] ${id};`;
+}
+
+function paramDecl(node, errors) {
+  const constraint = node.type === 'param+' ? '<lower=0>' : '';
+  const { spec } = node;
+  // Parse distribution to determine if we know the constraint from DIST_MAP
+  const distInfo = parseDistSpec(spec, errors);
+  const con = distInfo ? (DIST_MAP[distInfo.name]?.constraint || constraint) : constraint;
+  return `real${con} ${node.id};`;
+}
+
+function emitPrior(node, errors) {
+  const distInfo = parseDistSpec(node.spec, errors);
+  if (!distInfo) return null;
+  const entry = DIST_MAP[distInfo.name];
+  if (!entry) {
+    errors.push(`Unknown distribution "${distInfo.name}"`);
+    return null;
+  }
+  const isHalf = distInfo.name.startsWith('Half');
+  const comment = isHalf ? `  // ${distInfo.name}: truncated via <lower=0> constraint` : '';
+  return `${node.id} ~ ${entry.stanFn}(${distInfo.args});${comment}`;
+}
+
+function emitLikelihood(node, errors) {
+  const distInfo = parseDistSpec(node.spec, errors);
+  if (!distInfo) return null;
+  const entry = DIST_MAP[distInfo.name];
+  if (!entry) {
+    errors.push(`Unknown distribution "${distInfo.name}" on obs node "${node.id}"`);
+    return null;
+  }
+  return `${node.id} ~ ${entry.stanFn}(${distInfo.args});`;
+}
+
+// Parse "Normal(0,10)" → { name: "Normal", args: "0, 10" }
+function parseDistSpec(spec, errors) {
+  const re = /^(\w+)\(([^)]*)\)$/;
+  const m = spec && spec.match(re);
+  if (!m) {
+    if (spec && spec.trim()) {
+      // might be a det node spec (expression), skip silently
+    }
+    return null;
+  }
+  const args = m[2].split(',').map(s => s.trim()).join(', ');
+  return { name: m[1], args };
+}
+
+// Determine declaration type for a det node
+function detDecl(node, intVars, errors) {
+  const N = intVars.length > 0 ? intVars[0].id : 'N';
+  // Heuristic: if expression mentions a vector variable or intVar, declare as vector[N]
+  // For prototype: always declare as vector[N] if intVars exist, else real
+  if (intVars.length > 0) {
+    return `vector[${N}] ${node.id};`;
+  }
+  return `real ${node.id};`;
+}
+
+// Simple topological sort by Kahn's algorithm
+function topoSort(ids, edges) {
+  const idSet = new Set(ids);
+  // Only consider edges between det nodes
+  const relevantEdges = edges.filter(e => idSet.has(e.from) && idSet.has(e.to));
+
+  const inDegree = {};
+  const adj = {};
+  for (const id of ids) { inDegree[id] = 0; adj[id] = []; }
+  for (const { from, to } of relevantEdges) {
+    adj[from].push(to);
+    inDegree[to]++;
+  }
+
+  const queue = ids.filter(id => inDegree[id] === 0);
+  const result = [];
+  while (queue.length) {
+    const cur = queue.shift();
+    result.push(cur);
+    for (const next of (adj[cur] || [])) {
+      inDegree[next]--;
+      if (inDegree[next] === 0) queue.push(next);
+    }
+  }
+  // Append any remaining (handles cycles gracefully)
+  for (const id of ids) {
+    if (!result.includes(id)) result.push(id);
+  }
+  return result;
+}
+
+// ─── Diagram label preprocessor ─────────────────────────────────────────────
+// Rewrites node labels to include the variable name (ID) for visual clarity.
+
+function preprocessForDiagram(text) {
+  return text.replace(/(\w+)\[["']([^"']+)["']\]/g, (match, id, label) => {
+    const colonIdx = label.indexOf(':');
+    let type, spec;
+    if (colonIdx === -1) {
+      type = label.trim().toLowerCase();
+      spec = '';
+    } else {
+      type = label.slice(0, colonIdx).trim().toLowerCase();
+      spec = label.slice(colonIdx + 1).trim();
+    }
+
+    let newLabel;
+    switch (type) {
+      case 'int':
+        newLabel = `${id} (int)`;
+        break;
+      case 'data':
+        newLabel = `${id}: ${spec}`;
+        break;
+      case 'param':
+      case 'param+':
+        newLabel = `${id} ~ ${spec}`;
+        break;
+      case 'det':
+        newLabel = `${id} = ${spec}`;
+        break;
+      case 'obs':
+        newLabel = `${id} ~ ${spec}`;
+        break;
+      default:
+        newLabel = `${id}: ${label}`;
+    }
+    return `${id}["${newLabel}"]`;
+  });
+}
+
+// ─── Mermaid rendering ────────────────────────────────────────────────────────
+
+mermaid.initialize({ startOnLoad: false, theme: 'default' });
+
+let diagramId = 0;
+
+async function renderDiagram(text) {
+  const container = document.getElementById('diagram-output');
+  try {
+    diagramId++;
+    const id = `mermaid-diagram-${diagramId}`;
+    const processedText = preprocessForDiagram(text);
+    const { svg } = await mermaid.render(id, processedText.trim());
+    container.innerHTML = svg;
+  } catch (e) {
+    container.innerHTML = `<span style="color:#b91c1c;font-size:0.8rem;">Diagram error: ${e.message}</span>`;
+  }
+}
+
+// ─── Debounced update ─────────────────────────────────────────────────────────
+
+let debounceTimer = null;
+
+function onInput() {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(update, 400);
+}
+
+function update() {
+  const text = document.getElementById('mermaidInput').value;
+  const errorBar = document.getElementById('errorBar');
+  const stanOutput = document.getElementById('stanOutput');
+
+  if (!text.trim()) {
+    stanOutput.value = '';
+    errorBar.textContent = '';
+    errorBar.classList.remove('visible');
+    document.getElementById('diagram-output').innerHTML = '';
+    return;
+  }
+
+  // Parse → Stan
+  const { stan, errors } = parseMermaid(text);
+  stanOutput.value = stan;
+
+  if (errors.length) {
+    errorBar.textContent = errors.join(' | ');
+    errorBar.classList.add('visible');
+  } else {
+    errorBar.textContent = '';
+    errorBar.classList.remove('visible');
+  }
+
+  // Render diagram
+  renderDiagram(text);
+}
+
+// ─── Copy ─────────────────────────────────────────────────────────────────────
+
+function copyStan() {
+  const text = document.getElementById('stanOutput').value;
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('copyBtn');
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => {
+      btn.textContent = 'Copy';
+      btn.classList.remove('copied');
+    }, 1500);
+  });
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+
+document.getElementById('mermaidInput').addEventListener('input', onInput);
+
+// Load linear regression example on startup
+loadExample('linear');
+</script>
+</body>
+</html>
